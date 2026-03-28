@@ -16,6 +16,8 @@ obj_ft_dim="${OBJ_FT_DIM:-768}"
 ngpus="${NGPUS:-1}"
 seed="${SEED:-0}"
 mode="${1:-test}"
+dynamic_memory_mode="${DYNAMIC_MEMORY_MODE:-off}"
+dynamic_memory_extra_args="${DYNAMIC_MEMORY_EXTRA_ARGS:-}"
 
 name="Grid_Map-${train_alg}-${features}-reverie-single-gpu"
 name="${name}-seed.${seed}"
@@ -23,6 +25,33 @@ outdir="${OUTDIR:-${DATA_ROOT}/REVERIE/exprs_map/eval/${name}}"
 
 default_resume="${DATA_ROOT}/trained_models/reverie_best"
 resume_file="${RESUME_FILE:-${default_resume}}"
+
+dynamic_memory_args=()
+case "${dynamic_memory_mode}" in
+  off)
+    dynamic_memory_args+=(--dynamic_memory_mode off)
+    ;;
+  update_only)
+    dynamic_memory_args+=(--dynamic_memory_enabled --dynamic_memory_mode update_only)
+    ;;
+  decay_only)
+    dynamic_memory_args+=(--dynamic_memory_enabled --dynamic_memory_mode decay_only --dynamic_memory_decay_enabled)
+    ;;
+  full)
+    dynamic_memory_args+=(--dynamic_memory_enabled --dynamic_memory_mode full --dynamic_memory_decay_enabled)
+    ;;
+  *)
+    echo "Unsupported DYNAMIC_MEMORY_MODE: ${dynamic_memory_mode}" >&2
+    echo "Use one of: off, update_only, decay_only, full" >&2
+    exit 1
+    ;;
+esac
+
+if [[ -n "${dynamic_memory_extra_args}" ]]; then
+  # shellcheck disable=SC2206
+  extra_dynamic_memory_args=(${dynamic_memory_extra_args})
+  dynamic_memory_args+=("${extra_dynamic_memory_args[@]}")
+fi
 
 flag="--root_dir ${DATA_ROOT}
       --dataset reverie
@@ -100,14 +129,16 @@ cuda_devices="${CUDA_VISIBLE_DEVICES:-0}"
 
 case "${mode}" in
   train)
-    echo "Running REVERIE training on ${cuda_devices}, output: ${outdir}"
+    echo "Running REVERIE training on ${cuda_devices}, output: ${outdir}, dynamic_memory=${dynamic_memory_mode}"
     CUDA_VISIBLE_DEVICES="${cuda_devices}" "${launcher[@]}" main_nav_obj.py ${flag} \
+      "${dynamic_memory_args[@]}" \
       --resume_file "${resume_file}" \
       --eval_first
     ;;
   test)
-    echo "Running REVERIE test on ${cuda_devices}, output: ${outdir}, checkpoint: ${resume_file}"
+    echo "Running REVERIE test on ${cuda_devices}, output: ${outdir}, checkpoint: ${resume_file}, dynamic_memory=${dynamic_memory_mode}"
     CUDA_VISIBLE_DEVICES="${cuda_devices}" "${launcher[@]}" main_nav_obj.py ${flag} \
+      "${dynamic_memory_args[@]}" \
       --test --submit \
       --resume_file "${resume_file}"
     ;;

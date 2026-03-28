@@ -71,6 +71,15 @@ def init_distributed(opts):
     return rank
 
 
+def cleanup_distributed():
+    if not is_dist_avail_and_initialized():
+        return
+    try:
+        dist.destroy_process_group()
+    except Exception as e:
+        print(f"[WARN] destroy_process_group failed: {e}")
+
+
 def is_default_gpu(opts) -> bool:
     return opts.local_rank == -1 or dist.get_rank() == 0
 

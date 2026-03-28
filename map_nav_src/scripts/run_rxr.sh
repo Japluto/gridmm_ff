@@ -15,6 +15,8 @@ ngpus="${NGPUS:-1}"
 seed="${SEED:-0}"
 batch_size="${BATCH_SIZE:-1}"
 mode="${1:-train}"
+dynamic_memory_mode="${DYNAMIC_MEMORY_MODE:-off}"
+dynamic_memory_extra_args="${DYNAMIC_MEMORY_EXTRA_ARGS:-}"
 
 name="Grid_Map-${train_alg}-${features}-single-gpu-rxr"
 name="${name}-seed.${seed}"
@@ -22,6 +24,33 @@ outdir="${OUTDIR:-${DATA_ROOT}/RXR/exprs_map/finetune/${name}}"
 
 pretrain_ckpt="${PRETRAIN_CKPT:-}"
 resume_file="${RESUME_FILE:-}"
+
+dynamic_memory_args=()
+case "${dynamic_memory_mode}" in
+  off)
+    dynamic_memory_args+=(--dynamic_memory_mode off)
+    ;;
+  update_only)
+    dynamic_memory_args+=(--dynamic_memory_enabled --dynamic_memory_mode update_only)
+    ;;
+  decay_only)
+    dynamic_memory_args+=(--dynamic_memory_enabled --dynamic_memory_mode decay_only --dynamic_memory_decay_enabled)
+    ;;
+  full)
+    dynamic_memory_args+=(--dynamic_memory_enabled --dynamic_memory_mode full --dynamic_memory_decay_enabled)
+    ;;
+  *)
+    echo "Unsupported DYNAMIC_MEMORY_MODE: ${dynamic_memory_mode}" >&2
+    echo "Use one of: off, update_only, decay_only, full" >&2
+    exit 1
+    ;;
+esac
+
+if [[ -n "${dynamic_memory_extra_args}" ]]; then
+  # shellcheck disable=SC2206
+  extra_dynamic_memory_args=(${dynamic_memory_extra_args})
+  dynamic_memory_args+=("${extra_dynamic_memory_args[@]}")
+fi
 
 flag="--root_dir ${DATA_ROOT}
       --dataset rxr
@@ -106,8 +135,8 @@ case "${mode}" in
       fi
       extra_args+=(--bert_ckpt_file "${pretrain_ckpt}")
     fi
-    echo "Running RxR training on ${cuda_devices}, output: ${outdir}, batch_size=${batch_size}"
-    CUDA_VISIBLE_DEVICES="${cuda_devices}" "${launcher[@]}" main_rxr.py ${flag} "${extra_args[@]}"
+    echo "Running RxR training on ${cuda_devices}, output: ${outdir}, batch_size=${batch_size}, dynamic_memory=${dynamic_memory_mode}"
+    CUDA_VISIBLE_DEVICES="${cuda_devices}" "${launcher[@]}" main_rxr.py ${flag} "${dynamic_memory_args[@]}" "${extra_args[@]}"
     ;;
   test)
     if [[ -z "${resume_file}" ]]; then
@@ -118,8 +147,9 @@ case "${mode}" in
       echo "Missing RESUME_FILE: ${resume_file}" >&2
       exit 1
     fi
-    echo "Running RxR test on ${cuda_devices}, output: ${outdir}, checkpoint: ${resume_file}, batch_size=${batch_size}"
+    echo "Running RxR test on ${cuda_devices}, output: ${outdir}, checkpoint: ${resume_file}, batch_size=${batch_size}, dynamic_memory=${dynamic_memory_mode}"
     CUDA_VISIBLE_DEVICES="${cuda_devices}" "${launcher[@]}" main_rxr.py ${flag} \
+      "${dynamic_memory_args[@]}" \
       --test --submit \
       --resume_file "${resume_file}"
     ;;

@@ -240,11 +240,12 @@ class EnvBatch(object):
 
     def _dynamic_memory_update(self, i, semantic, position_x, position_y, valid_mask, step_id):
         semantic = semantic.astype(np.float32)
-        position_x = position_x.astype(np.float32)
-        position_y = position_y.astype(np.float32)
+        position_x = position_x.astype(np.float32).reshape(-1)
+        position_y = position_y.astype(np.float32).reshape(-1)
+        valid_mask = valid_mask.astype(bool).reshape(-1)
 
         if len(self.global_semantic[i]) == 0:
-            valid_index = valid_mask.astype(bool)
+            valid_index = valid_mask
             if not valid_index.any():
                 valid_index = np.ones_like(valid_mask, dtype=bool)
             self.global_semantic[i] = semantic[valid_index]
@@ -258,7 +259,7 @@ class EnvBatch(object):
             return
 
         radius_sq = self.dynamic_memory_match_radius ** 2
-        for patch_idx in np.where(valid_mask.astype(bool))[0]:
+        for patch_idx in np.where(valid_mask)[0]:
             new_feat = semantic[patch_idx]
             new_x = position_x[patch_idx]
             new_y = position_y[patch_idx]

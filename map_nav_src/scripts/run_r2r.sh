@@ -14,6 +14,8 @@ ft_dim="${FT_DIM:-768}"
 ngpus="${NGPUS:-1}"
 seed="${SEED:-0}"
 mode="${1:-test}"
+dynamic_memory_mode="${DYNAMIC_MEMORY_MODE:-off}"
+dynamic_memory_extra_args="${DYNAMIC_MEMORY_EXTRA_ARGS:-}"
 
 name="Grid_Map-${train_alg}-${features}-single-gpu"
 name="${name}-seed.${seed}"
@@ -21,6 +23,33 @@ outdir="${OUTDIR:-${DATA_ROOT}/R2R/exprs_map/eval/${name}}"
 
 default_resume="${DATA_ROOT}/trained_models/r2r_best"
 resume_file="${RESUME_FILE:-${default_resume}}"
+
+dynamic_memory_args=()
+case "${dynamic_memory_mode}" in
+  off)
+    dynamic_memory_args+=(--dynamic_memory_mode off)
+    ;;
+  update_only)
+    dynamic_memory_args+=(--dynamic_memory_enabled --dynamic_memory_mode update_only)
+    ;;
+  decay_only)
+    dynamic_memory_args+=(--dynamic_memory_enabled --dynamic_memory_mode decay_only --dynamic_memory_decay_enabled)
+    ;;
+  full)
+    dynamic_memory_args+=(--dynamic_memory_enabled --dynamic_memory_mode full --dynamic_memory_decay_enabled)
+    ;;
+  *)
+    echo "Unsupported DYNAMIC_MEMORY_MODE: ${dynamic_memory_mode}" >&2
+    echo "Use one of: off, update_only, decay_only, full" >&2
+    exit 1
+    ;;
+esac
+
+if [[ -n "${dynamic_memory_extra_args}" ]]; then
+  # shellcheck disable=SC2206
+  extra_dynamic_memory_args=(${dynamic_memory_extra_args})
+  dynamic_memory_args+=("${extra_dynamic_memory_args[@]}")
+fi
 
 flag="--root_dir ${DATA_ROOT}
       --dataset r2r
@@ -89,22 +118,24 @@ cuda_devices="${CUDA_VISIBLE_DEVICES:-0}"
 case "${mode}" in
   # 当mode为"train"时的处理分支
   train)
-    echo "Running R2R training on ${cuda_devices}, output: ${outdir}"
+    echo "Running R2R training on ${cuda_devices}, output: ${outdir}, dynamic_memory=${dynamic_memory_mode}"
     # 设置CUDA设备并使用指定的启动器运行main_nav.py进行训练
     # --resume_file 指定恢复训练的文件
     # --eval_first 表示在开始训练前先进行评估
     CUDA_VISIBLE_DEVICES="${cuda_devices}" "${launcher[@]}" main_nav.py ${flag} \
+      "${dynamic_memory_args[@]}" \
       --resume_file "${resume_file}" \
       --eval_first
     ;;
   # 当mode为"test"时的处理分支
   test)
-    echo "Running R2R test on ${cuda_devices}, output: ${outdir}, checkpoint: ${resume_file}"
+    echo "Running R2R test on ${cuda_devices}, output: ${outdir}, checkpoint: ${resume_file}, dynamic_memory=${dynamic_memory_mode}"
     # 设置CUDA设备并使用指定的启动器运行main_nav.py进行测试
     # --test 表示测试模式
     # --submit 表示提交测试结果
     # --resume_file 指定测试使用的模型检查点文件
     CUDA_VISIBLE_DEVICES="${cuda_devices}" "${launcher[@]}" main_nav.py ${flag} \
+      "${dynamic_memory_args[@]}" \
       --test --submit \
       --resume_file "${resume_file}"
     ;;

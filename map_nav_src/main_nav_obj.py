@@ -9,7 +9,7 @@ from tensorboardX import SummaryWriter
 
 from utils.misc import set_random_seed
 from utils.logger import write_to_record_file, print_progress, timeSince
-from utils.distributed import init_distributed, is_default_gpu
+from utils.distributed import init_distributed, is_default_gpu, cleanup_distributed
 from utils.distributed import all_gather, merge_dist_results
 
 from models.vlnbert_init import get_tokenizer
@@ -275,20 +275,21 @@ def valid(args, train_env, val_envs, rank=-1):
 
 def main():
     args = parse_args()
+    rank = 0
+    try:
+        if args.world_size > 1:
+            rank = init_distributed(args)
+            torch.cuda.set_device(args.local_rank)
 
-    if args.world_size > 1:
-        rank = init_distributed(args)
-        torch.cuda.set_device(args.local_rank)
-    else:
-        rank = 0
+        set_random_seed(args.seed + rank)
+        train_env, val_envs, aug_env = build_dataset(args, rank=rank, is_test=args.test)
 
-    set_random_seed(args.seed + rank)
-    train_env, val_envs, aug_env = build_dataset(args, rank=rank, is_test=args.test)
-
-    if not args.test:
-        train(args, train_env, val_envs, aug_env=aug_env, rank=rank)
-    else:
-        valid(args, train_env, val_envs, rank=rank)
+        if not args.test:
+            train(args, train_env, val_envs, aug_env=aug_env, rank=rank)
+        else:
+            valid(args, train_env, val_envs, rank=rank)
+    finally:
+        cleanup_distributed()
             
 
 if __name__ == '__main__':
