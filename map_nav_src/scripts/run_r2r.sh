@@ -16,6 +16,8 @@ seed="${SEED:-0}"
 mode="${1:-test}"
 dynamic_memory_mode="${DYNAMIC_MEMORY_MODE:-off}"
 dynamic_memory_extra_args="${DYNAMIC_MEMORY_EXTRA_ARGS:-}"
+dual_stop_mode="${DUAL_STOP_MODE:-off}"
+dual_stop_extra_args="${DUAL_STOP_EXTRA_ARGS:-}"
 
 name="Grid_Map-${train_alg}-${features}-single-gpu"
 name="${name}-seed.${seed}"
@@ -49,6 +51,26 @@ if [[ -n "${dynamic_memory_extra_args}" ]]; then
   # shellcheck disable=SC2206
   extra_dynamic_memory_args=(${dynamic_memory_extra_args})
   dynamic_memory_args+=("${extra_dynamic_memory_args[@]}")
+fi
+
+dual_stop_args=()
+case "${dual_stop_mode}" in
+  off)
+    ;;
+  on)
+    dual_stop_args+=(--dual_stop_enabled)
+    ;;
+  *)
+    echo "Unsupported DUAL_STOP_MODE: ${dual_stop_mode}" >&2
+    echo "Use one of: off, on" >&2
+    exit 1
+    ;;
+esac
+
+if [[ -n "${dual_stop_extra_args}" ]]; then
+  # shellcheck disable=SC2206
+  extra_dual_stop_args=(${dual_stop_extra_args})
+  dual_stop_args+=("${extra_dual_stop_args[@]}")
 fi
 
 flag="--root_dir ${DATA_ROOT}
@@ -118,24 +140,26 @@ cuda_devices="${CUDA_VISIBLE_DEVICES:-0}"
 case "${mode}" in
   # 当mode为"train"时的处理分支
   train)
-    echo "Running R2R training on ${cuda_devices}, output: ${outdir}, dynamic_memory=${dynamic_memory_mode}"
+    echo "Running R2R training on ${cuda_devices}, output: ${outdir}, dynamic_memory=${dynamic_memory_mode}, dual_stop=${dual_stop_mode}"
     # 设置CUDA设备并使用指定的启动器运行main_nav.py进行训练
     # --resume_file 指定恢复训练的文件
     # --eval_first 表示在开始训练前先进行评估
     CUDA_VISIBLE_DEVICES="${cuda_devices}" "${launcher[@]}" main_nav.py ${flag} \
       "${dynamic_memory_args[@]}" \
+      "${dual_stop_args[@]}" \
       --resume_file "${resume_file}" \
       --eval_first
     ;;
   # 当mode为"test"时的处理分支
   test)
-    echo "Running R2R test on ${cuda_devices}, output: ${outdir}, checkpoint: ${resume_file}, dynamic_memory=${dynamic_memory_mode}"
+    echo "Running R2R test on ${cuda_devices}, output: ${outdir}, checkpoint: ${resume_file}, dynamic_memory=${dynamic_memory_mode}, dual_stop=${dual_stop_mode}"
     # 设置CUDA设备并使用指定的启动器运行main_nav.py进行测试
     # --test 表示测试模式
     # --submit 表示提交测试结果
     # --resume_file 指定测试使用的模型检查点文件
     CUDA_VISIBLE_DEVICES="${cuda_devices}" "${launcher[@]}" main_nav.py ${flag} \
       "${dynamic_memory_args[@]}" \
+      "${dual_stop_args[@]}" \
       --test --submit \
       --resume_file "${resume_file}"
     ;;

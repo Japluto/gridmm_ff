@@ -273,6 +273,53 @@ class GMapNavAgent(Seq2SeqAgent):
                 self.scanvp_cands[scanvp].setdefault(cand['viewpointId'], {})
                 self.scanvp_cands[scanvp][cand['viewpointId']] = cand['pointId']
 
+    def _apply_dual_stop(self, a_t, nav_probs, nav_logits, nav_inputs, obs, t, ended, vp_visit_counts):
+        dual_stop_vetoed = np.array([False] * len(obs))
+        if (not self.args.dual_stop_enabled) or (not self.args.test):
+            return a_t, dual_stop_vetoed
+        if self.feedback in ('teacher', 'sample'):
+            return a_t, dual_stop_vetoed
+
+        cpu_nav_probs = nav_probs.detach().cpu()
+        cpu_nav_logits = nav_logits.detach().cpu()
+
+        for i, ob in enumerate(obs):
+            if ended[i] or int(a_t[i].item()) != 0:
+                continue
+
+            stop_prob = float(cpu_nav_probs[i, 0].item())
+            semantic_stop_ok = stop_prob >= self.args.dual_stop_score_thresh
+
+            finite_mask = torch.isfinite(cpu_nav_logits[i])
+            best_nonstop_idx = None
+            best_nonstop_prob = -float('inf')
+            for j in range(1, cpu_nav_probs.size(1)):
+                if finite_mask[j]:
+                    cand_prob = float(cpu_nav_probs[i, j].item())
+                    if cand_prob > best_nonstop_prob:
+                        best_nonstop_prob = cand_prob
+                        best_nonstop_idx = j
+
+            geometric_stop_ok = t >= self.args.dual_stop_min_step
+            if geometric_stop_ok:
+                geometric_stop_ok = (
+                    vp_visit_counts[i][ob['viewpoint']] >= self.args.dual_stop_revisit_thresh or
+                    nav_inputs['no_vp_left'][i] or
+                    (
+                        best_nonstop_idx is not None and
+                        stop_prob >= best_nonstop_prob - self.args.dual_stop_margin_thresh
+                    )
+                )
+
+            if semantic_stop_ok and geometric_stop_ok:
+                continue
+
+            if best_nonstop_idx is not None:
+                a_t[i] = best_nonstop_idx
+                dual_stop_vetoed[i] = True
+
+        return a_t, dual_stop_vetoed
+
     # @profile
     def rollout(self, train_ml=None, train_rl=False, reset=True):
         if reset:  # Reset env
@@ -301,6 +348,7 @@ class GMapNavAgent(Seq2SeqAgent):
         # Initialization the tracking state
         ended = np.array([False] * batch_size)
         just_ended = np.array([False] * batch_size)
+        vp_visit_counts = [defaultdict(int) for _ in range(batch_size)]
 
         # Init the logs
         masks = []
@@ -310,6 +358,7 @@ class GMapNavAgent(Seq2SeqAgent):
         for t in range(self.args.max_action_len):
             for i, gmap in enumerate(gmaps):
                 if not ended[i]:
+                    vp_visit_counts[i][obs[i]['viewpoint']] += 1
                     gmap.node_step_ids[obs[i]['viewpoint']] = t + 1
 
             # graph representation
@@ -354,14 +403,6 @@ class GMapNavAgent(Seq2SeqAgent):
 
             grid_logits = nav_outs['grid_logits']
             nav_probs = torch.softmax(nav_logits, 1)
-            
-            # update graph
-            for i, gmap in enumerate(gmaps):
-                if not ended[i]:
-                    i_vp = obs[i]['viewpoint']
-                    gmap.node_stop_scores[i_vp] = {
-                        'stop': nav_probs[i, 0].data.item(),
-                    }
                                         
             if train_ml is not None:
                 # Supervised training
@@ -405,6 +446,21 @@ class GMapNavAgent(Seq2SeqAgent):
             else:
                 print(self.feedback)
                 sys.exit('Invalid feedback option')
+
+            a_t, dual_stop_vetoed = self._apply_dual_stop(
+                a_t, nav_probs, nav_logits, nav_inputs, obs, t, ended, vp_visit_counts
+            )
+
+            # Keep historical stop scores consistent with the dual-stop veto.
+            for i, gmap in enumerate(gmaps):
+                if ended[i]:
+                    continue
+                if dual_stop_vetoed[i]:
+                    continue
+                i_vp = obs[i]['viewpoint']
+                gmap.node_stop_scores[i_vp] = {
+                    'stop': nav_probs[i, 0].data.item(),
+                }
 
             # Determine stop actions
             if self.feedback == 'teacher' or self.feedback == 'sample': # in training
