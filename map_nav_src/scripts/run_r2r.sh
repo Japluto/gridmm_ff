@@ -18,6 +18,8 @@ dynamic_memory_mode="${DYNAMIC_MEMORY_MODE:-off}"
 dynamic_memory_extra_args="${DYNAMIC_MEMORY_EXTRA_ARGS:-}"
 dual_stop_mode="${DUAL_STOP_MODE:-off}"
 dual_stop_extra_args="${DUAL_STOP_EXTRA_ARGS:-}"
+instr_aug_mode="${INSTR_AUG_MODE:-off}"
+instr_aug_extra_args="${INSTR_AUG_EXTRA_ARGS:-}"
 
 name="Grid_Map-${train_alg}-${features}-single-gpu"
 name="${name}-seed.${seed}"
@@ -71,6 +73,26 @@ if [[ -n "${dual_stop_extra_args}" ]]; then
   # shellcheck disable=SC2206
   extra_dual_stop_args=(${dual_stop_extra_args})
   dual_stop_args+=("${extra_dual_stop_args[@]}")
+fi
+
+instr_aug_args=()
+case "${instr_aug_mode}" in
+  off)
+    ;;
+  on)
+    instr_aug_args+=(--instr_aug_enabled)
+    ;;
+  *)
+    echo "Unsupported INSTR_AUG_MODE: ${instr_aug_mode}" >&2
+    echo "Use one of: off, on" >&2
+    exit 1
+    ;;
+esac
+
+if [[ -n "${instr_aug_extra_args}" ]]; then
+  # shellcheck disable=SC2206
+  extra_instr_aug_args=(${instr_aug_extra_args})
+  instr_aug_args+=("${extra_instr_aug_args[@]}")
 fi
 
 flag="--root_dir ${DATA_ROOT}
@@ -140,19 +162,20 @@ cuda_devices="${CUDA_VISIBLE_DEVICES:-0}"
 case "${mode}" in
   # 当mode为"train"时的处理分支
   train)
-    echo "Running R2R training on ${cuda_devices}, output: ${outdir}, dynamic_memory=${dynamic_memory_mode}, dual_stop=${dual_stop_mode}"
+    echo "Running R2R training on ${cuda_devices}, output: ${outdir}, dynamic_memory=${dynamic_memory_mode}, dual_stop=${dual_stop_mode}, instr_aug=${instr_aug_mode}"
     # 设置CUDA设备并使用指定的启动器运行main_nav.py进行训练
     # --resume_file 指定恢复训练的文件
     # --eval_first 表示在开始训练前先进行评估
     CUDA_VISIBLE_DEVICES="${cuda_devices}" "${launcher[@]}" main_nav.py ${flag} \
       "${dynamic_memory_args[@]}" \
       "${dual_stop_args[@]}" \
+      "${instr_aug_args[@]}" \
       --resume_file "${resume_file}" \
       --eval_first
     ;;
   # 当mode为"test"时的处理分支
   test)
-    echo "Running R2R test on ${cuda_devices}, output: ${outdir}, checkpoint: ${resume_file}, dynamic_memory=${dynamic_memory_mode}, dual_stop=${dual_stop_mode}"
+    echo "Running R2R test on ${cuda_devices}, output: ${outdir}, checkpoint: ${resume_file}, dynamic_memory=${dynamic_memory_mode}, dual_stop=${dual_stop_mode}, instr_aug=${instr_aug_mode}"
     # 设置CUDA设备并使用指定的启动器运行main_nav.py进行测试
     # --test 表示测试模式
     # --submit 表示提交测试结果
@@ -160,6 +183,7 @@ case "${mode}" in
     CUDA_VISIBLE_DEVICES="${cuda_devices}" "${launcher[@]}" main_nav.py ${flag} \
       "${dynamic_memory_args[@]}" \
       "${dual_stop_args[@]}" \
+      "${instr_aug_args[@]}" \
       --test --submit \
       --resume_file "${resume_file}"
     ;;

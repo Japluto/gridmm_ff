@@ -36,7 +36,7 @@ def build_dataset(args, rank=0, is_test=False):
         aug_instr_data = construct_instrs(
             args.anno_dir, args.dataset, [args.aug], 
             tokenizer=args.tokenizer, max_instr_len=args.max_instr_len,
-            is_test=is_test
+            is_test=is_test, tokenizer_obj=tok, args=args
         )
         aug_env = dataset_class(
             feat_db, aug_instr_data, args.connectivity_dir, 
@@ -50,7 +50,7 @@ def build_dataset(args, rank=0, is_test=False):
     train_instr_data = construct_instrs(
         args.anno_dir, args.dataset, ['train'], 
         tokenizer=args.tokenizer, max_instr_len=args.max_instr_len,
-        is_test=is_test
+        is_test=is_test, tokenizer_obj=tok, args=args
     )
     train_env = dataset_class(
         feat_db, train_instr_data, args.connectivity_dir,
@@ -72,7 +72,7 @@ def build_dataset(args, rank=0, is_test=False):
         val_instr_data = construct_instrs(
             args.anno_dir, args.dataset, [split], 
             tokenizer=args.tokenizer, max_instr_len=args.max_instr_len,
-            is_test=is_test
+            is_test=is_test, tokenizer_obj=tok, args=args
         )
         
         val_env = dataset_class(

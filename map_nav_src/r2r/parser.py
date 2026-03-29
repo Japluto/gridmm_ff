@@ -113,6 +113,11 @@ def parse_args():
     parser.add_argument('--dual_stop_margin_thresh', type=float, default=0.03)
     parser.add_argument('--dual_stop_revisit_thresh', type=int, default=2)
 
+    # Test-time instruction augmentation
+    parser.add_argument('--instr_aug_enabled', action='store_true', default=False)
+    parser.add_argument('--instr_aug_max_keywords', type=int, default=6)
+    parser.add_argument('--instr_aug_debug_print', action='store_true', default=False)
+
     # # A2C
     parser.add_argument("--gamma", default=0.9, type=float, help='reward discount factor')
     parser.add_argument(
