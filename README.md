@@ -1,183 +1,164 @@
 # DART-VLN: Test-Time Memory Decay and Anti-Loop Regularization for Discrete Vision-and-Language Navigation
 ---
-## GridMM_ff
+work leader: Japluto
 
-这个目录是从原始 [`GridMM`](/home/japluto/VLN/GridMM) 中拆出来的一个**离散环境工作副本**，用途是：
+This repository is a discrete-environment research fork of GridMM for the paper:
 
-- 后续只在这里改代码
-- 只关注离散数据集的训练入口和 eval 入口
-- 方便初始化新 Git 仓库并上传 GitHub
+**DART-VLN: Test-Time Memory Decay and Anti-Loop Regularization for Discrete Vision-and-Language Navigation**
 
-当前这份副本**不再以连续环境 `VLN_CE` 为主线**，而是优先服务：
+The project focuses on **small, training-free test-time improvements** for discrete VLN.
+Instead of introducing new learnable modules, DART-VLN studies how far we can push performance and behavior quality by modifying:
+
+- **memory readout**: soft decay of stale grid memory
+- **action regularization**: lightweight anti-loop / immediate backtrack suppression
+
+The main target datasets are:
 
 - `R2R`
 - `REVERIE`
 - `RxR`
 
-## 当前目录结构
+## What This Repo Is
 
-保留的主要代码目录：
+`GridMM_ff` is a working copy extracted from the original `GridMM` codebase, with the focus shifted from continuous-environment pipelines to **discrete navigation and evaluation**.
 
-- [`map_nav_src`](/home/japluto/VLN/GridMM_ff/map_nav_src)
-- [`pretrain_src`](/home/japluto/VLN/GridMM_ff/pretrain_src)
-- [`preprocess`](/home/japluto/VLN/GridMM_ff/preprocess)
+The repository is organized around:
 
-已经迁移到本目录、但被 Git 忽略的大资源：
+- `map_nav_src/`: discrete navigation agents, environments, and scripts
+- `pretrain_src/`: pretraining code kept for completeness
+- `preprocess/`: preprocessing utilities
 
-- [`datasets`](/home/japluto/VLN/GridMM_ff/datasets)
-- [`data/pretrained_models`](/home/japluto/VLN/GridMM_ff/data/pretrained_models)
+Large resources such as datasets and pretrained checkpoints are expected locally but are git-ignored.
 
-Git 忽略规则见：
+## Main Idea
 
-- [`.gitignore`](/home/japluto/VLN/GridMM_ff/.gitignore)
+Our working hypothesis is simple:
 
-## 已做的离散环境改动
+- the grid memory should not keep stale information forever
+- old or redundant information should be softly downweighted at readout
+- the agent should avoid obvious short loops such as immediate backtracking
 
-### 1. 新建 `GridMM_ff` 工作副本
+This leads to two practical test-time components:
 
-已经把离散相关代码框架从原仓库复制到了这里，并将离散数据和权重**迁移**到了新目录：
+### 1. Memory Decay
 
-- 原目录中的 `datasets/` 已迁移到 [`GridMM_ff/datasets`](/home/japluto/VLN/GridMM_ff/datasets)
-- 原目录中的 `data/pretrained_models/` 已迁移到 [`GridMM_ff/data/pretrained_models`](/home/japluto/VLN/GridMM_ff/data/pretrained_models)
+We add a lightweight **memory decay** mechanism for grid memory readout.
 
-这样后续可以直接在 `GridMM_ff` 下工作，不需要依赖旧目录。
+- no retraining
+- no new trainable parameters
+- easy ablation through config flags
 
-### 2. GitHub 友好的忽略策略
+The strongest result so far is that **`decay_only` is more stable than more aggressive memory rewriting schemes** such as `update_only` or `full`.
 
-当前 `.gitignore` 采用的是“**保留代码目录，忽略根目录大资源**”的方式：
+### 2. Anti-Loop Regularization
 
-- 忽略根目录下的 `/datasets/`
-- 忽略根目录下的 `/data/`
-- 不会误伤 `pretrain_src/data` 这类代码目录
+We add a small **anti-loop penalty** at action selection time.
 
-### 3. RxR 单卡脚本适配
+In practice, the useful part is:
 
-已经修改：
+- **immediate backtrack suppression**
 
-- [`map_nav_src/rxr/parser.py`](/home/japluto/VLN/GridMM_ff/map_nav_src/rxr/parser.py)
-- [`map_nav_src/scripts/run_rxr.sh`](/home/japluto/VLN/GridMM_ff/map_nav_src/scripts/run_rxr.sh)
+That is, if the next hop of a candidate action would directly return to the previous viewpoint, we apply a small penalty before final action selection.
 
-主要改动：
+This mechanism is:
 
-- 支持 `--dataset rxr`
-- 默认单卡 `NGPUS=1`
-- 默认 `BATCH_SIZE=1`
-- 默认 `--tokenizer xlm`
-- 单卡时直接走 `python3 main_rxr.py`
-- 增加路径检查和缺失提示
+- test-time only
+- non-invasive
+- compatible with `decay_only`
 
-## 已做的离散环境尝试
+## What We Tried
 
-### 1. 权重类型检查
+Over the course of this project, we explored several lightweight directions:
 
-新增脚本：
+- **dynamic memory update** with heuristic write gates
+- **soft memory decay** during readout
+- **dual STOP** rules for R2R
+- **instruction-side augmentation**
+- **instruction-aware reranking**
+- **anti-loop / backtrack suppression**
 
-- [`map_nav_src/scripts/check_nav_ckpt.py`](/home/japluto/VLN/GridMM_ff/map_nav_src/scripts/check_nav_ckpt.py)
+Current takeaways:
 
-已经验证：
+- `decay_only` is the most reliable memory-side improvement
+- `anti-loop` is useful mainly as **immediate backtrack suppression**
+- `instruction`-side heuristics and `dual STOP` were not as robust in our current setting
 
-- [`datasets/trained_models/r2r_best`](/home/japluto/VLN/GridMM_ff/datasets/trained_models/r2r_best)
-  - 是离散导航完整 checkpoint
-  - 可作为 `resume_file`
-- [`datasets/trained_models/reverie_best`](/home/japluto/VLN/GridMM_ff/datasets/trained_models/reverie_best)
-  - 可用于 `REVERIE` eval
-- [`data/pretrained_models/grid_map.pt`](/home/japluto/VLN/GridMM_ff/data/pretrained_models/grid_map.pt)
-  - 不是离散 `resume_file`
-  - 更像 backbone 初始化权重
-  - 不适合直接拿来跑离散 `RxR eval`
+## Current Status
 
-### 2. R2R eval smoke
+### R2R
 
-已经在新目录里成功拉起 `R2R` 的离散 eval 链，使用：
+This is the main development and evaluation track.
 
-- [`map_nav_src/scripts/run_r2r.sh`](/home/japluto/VLN/GridMM_ff/map_nav_src/scripts/run_r2r.sh)
+Current practical recommendation:
 
-关键信号：
+- use `decay_only` as the main score-oriented configuration
+- use `decay_only + anti-loop` as a behavior/efficiency-oriented variant
 
-- 成功加载 checkpoint
-- 成功加载 train / val / test split
-- 成功生成预测文件
-- 成功写出评测日志
+### REVERIE
 
-输出目录：
+The same dynamic-memory and anti-loop ideas have also been migrated to REVERIE.
 
-- [`datasets/R2R/exprs_map/eval/Grid_Map-dagger-vitbase-single-gpu-seed.0`](/home/japluto/VLN/GridMM_ff/datasets/R2R/exprs_map/eval/Grid_Map-dagger-vitbase-single-gpu-seed.0)
+Empirically, `decay_only + anti-loop` appears especially interesting for **unseen generalization**, even when gains are not uniform across all splits.
 
-当前 smoke 里已经看到的结果：
+### RxR
 
-- `val_seen: sr 79.92, spl 73.62`
-- `val_unseen: sr 75.44, spl 65.06`
+The discrete evaluation path and scripts are organized, but usable finetuned checkpoints may still need to be prepared depending on the experiment.
 
-对应日志：
+## Important Design Principle
 
-- [`valid.txt`](/home/japluto/VLN/GridMM_ff/datasets/R2R/exprs_map/eval/Grid_Map-dagger-vitbase-single-gpu-seed.0/logs/valid.txt)
+This project intentionally favors:
 
-### 3. REVERIE eval smoke
+- **test-time heuristics**
+- **small code footprint**
+- **clear ablations**
+- **no architecture rewrite**
 
-已经在新目录里成功拉起 `REVERIE` 的离散 eval 链，使用的是：
+In other words, DART-VLN is about improving discrete VLN behavior with simple, explainable mechanisms rather than adding new learned components.
 
-- [`main_nav_obj.py`](/home/japluto/VLN/GridMM_ff/map_nav_src/main_nav_obj.py)
+## Running Experiments
 
-关键信号：
+The main script entry points are:
 
-- 成功加载 train / val split
-- 成功加载 `reverie_best`
-- 成功写出日志
-- 已看到至少一条评测结果输出
+- `map_nav_src/scripts/run_r2r.sh`
+- `map_nav_src/scripts/run_reverie.sh`
+- `map_nav_src/scripts/run_rxr.sh`
 
-当前 smoke 已看到：
+These scripts already expose the relevant switches for:
 
-- `val_train_seen: sr 95.12, spl 92.93`
+- dynamic memory mode
+- anti-loop mode
+- dataset-specific evaluation
 
-对应日志：
+Typical examples:
 
-- [`valid.txt`](/home/japluto/VLN/GridMM_ff/default/reverie_smoke_eval/logs/valid.txt)
+```bash
+cd map_nav_src
+bash scripts/run_r2r.sh test
+```
 
-### 4. RxR 当前状态
+```bash
+cd map_nav_src
+DYNAMIC_MEMORY_MODE=decay_only bash scripts/run_r2r.sh test
+```
 
-`RxR` 注释数据和脚本已经对齐，但**目前本地没有可直接用于离散 `RxR eval` 的 finetuned checkpoint**。
+```bash
+cd map_nav_src
+DYNAMIC_MEMORY_MODE=decay_only \
+ANTI_LOOP_MODE=on \
+ANTI_LOOP_EXTRA_ARGS="--anti_loop_backtrack_penalty 0.22 --anti_loop_revisit_penalty 0.0 --anti_loop_revisit_thresh 2 --anti_loop_min_step 1" \
+bash scripts/run_r2r.sh test
+```
 
-当前结论：
+## Recommended Reading Inside This Repo
 
-- 数据注释在 [`datasets/RXR/annotations`](/home/japluto/VLN/GridMM_ff/datasets/RXR/annotations)
-- 代码入口和单卡脚本已经整理好
-- 但没有找到合适的 `resume_file`
-- 因此还不能直接做 `RxR eval`
+For experiment notes and reflections, see the `codex/` folder.
+Useful summaries include:
 
-## 已知注意事项
+- `codex/阶段性实验总览.md`
+- `codex/decay_antiloop_summary.md`
+- `codex/instruction_line_summary.md`
+- `codex/反思报告_dynamic_update与instruction优化.md`
 
-### 1. R2R 不建议裸跑 `python main_nav.py`
+## Acknowledgement
 
-`R2R` 这套代码默认会初始化分布式环境，直接裸跑容易报：
-
-- `Can't find any rank or local rank`
-
-所以更稳妥的方式是直接走：
-
-- [`run_r2r.sh`](/home/japluto/VLN/GridMM_ff/map_nav_src/scripts/run_r2r.sh)
-
-### 2. Matterport3D 扫描目录
-
-代码里默认会把扫描目录解析成：
-
-- `datasets/Matterport3D/v1_unzip_scans`
-
-当前本目录下没有明确补齐这个目录，但 `R2R` / `REVERIE` 的 smoke 已经能起 eval 链，说明至少在现阶段并没有阻塞基本离散评测。
-
-如果后续某条任务线在 MatterSim 上报 scan data 缺失，再单独补这个目录。
-
-### 3. 后续工作方式
-
-接下来默认在 [`GridMM_ff`](/home/japluto/VLN/GridMM_ff) 内继续开发，优先模式是：
-
-- 修改代码
-- 跑离散 eval
-- 不再以训练为主要目标
-
-## 常用 eval 命令
-
-已经单独整理在：
-
-- [`map_nav_src/scripts/EVAL_COMMANDS.md`](/home/japluto/VLN/GridMM_ff/map_nav_src/scripts/EVAL_COMMANDS.md)
-
-后续直接按这个文件里的命令跑即可。
+This repository is built on top of the original **GridMM** codebase and keeps its discrete VLN foundation while focusing on new test-time regularization ideas for memory and action selection.
