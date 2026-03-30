@@ -149,16 +149,6 @@ ANTI_LOOP_EXTRA_ARGS="--anti_loop_backtrack_penalty 0.22 --anti_loop_revisit_pen
 bash scripts/run_r2r.sh test
 ```
 
-## Recommended Reading Inside This Repo
-
-For experiment notes and reflections, see the `codex/` folder.
-Useful summaries include:
-
-- `codex/阶段性实验总览.md`
-- `codex/decay_antiloop_summary.md`
-- `codex/instruction_line_summary.md`
-- `codex/反思报告_dynamic_update与instruction优化.md`
-
 ## Acknowledgement
 
 This repository is built on top of the original **GridMM** codebase and keeps its discrete VLN foundation while focusing on new test-time regularization ideas for memory and action selection.
