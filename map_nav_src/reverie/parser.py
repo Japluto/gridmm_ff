@@ -110,6 +110,13 @@ def parse_args():
     parser.add_argument('--dynamic_memory_max_mem_weight', type=float, default=1.0)
     parser.add_argument('--dynamic_memory_match_radius', type=float, default=0.75)
 
+    # Inference-time anti-loop / immediate backtrack suppression
+    parser.add_argument('--anti_loop_enabled', action='store_true', default=False)
+    parser.add_argument('--anti_loop_backtrack_penalty', type=float, default=0.08)
+    parser.add_argument('--anti_loop_revisit_penalty', type=float, default=0.03)
+    parser.add_argument('--anti_loop_revisit_thresh', type=int, default=2)
+    parser.add_argument('--anti_loop_min_step', type=int, default=2)
+
     # # A2C
     parser.add_argument("--gamma", default=0.9, type=float, help='reward discount factor')
     parser.add_argument(

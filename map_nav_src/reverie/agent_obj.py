@@ -34,6 +34,19 @@ class GMapObjectNavAgent(Seq2SeqAgent):
         self.critic = Critic(self.args).cuda()
         # buffer
         self.scanvp_cands = {}
+        self.anti_loop_stats = defaultdict(int)
+
+    def test(self, use_dropout=False, feedback='argmax', allow_cheat=False, iters=None, viz=False):
+        self.anti_loop_stats = defaultdict(int)
+        super().test(use_dropout=use_dropout, feedback=feedback, allow_cheat=allow_cheat, iters=iters, viz=viz)
+        if self.args.anti_loop_enabled and self.args.test and self.default_gpu:
+            print(
+                '[anti_loop_stats] '
+                f"anti_loop_trigger_count={self.anti_loop_stats['anti_loop_trigger_count']}, "
+                f"backtrack_penalty_count={self.anti_loop_stats['backtrack_penalty_count']}, "
+                f"revisit_penalty_count={self.anti_loop_stats['revisit_penalty_count']}, "
+                f"anti_loop_action_changed_count={self.anti_loop_stats['anti_loop_action_changed_count']}"
+            )
 
     def _language_variable(self, obs):
         seq_lengths = [len(ob['instr_encoding']) for ob in obs]
@@ -297,6 +310,66 @@ class GMapObjectNavAgent(Seq2SeqAgent):
                 self.scanvp_cands[scanvp].setdefault(cand['viewpointId'], {})
                 self.scanvp_cands[scanvp][cand['viewpointId']] = cand['pointId']
 
+    def _get_graph_path_hops(self, gmap, cur_vp, target_vp):
+        path = gmap.graph.path(cur_vp, target_vp)
+        next_hop = path[0] if len(path) > 0 else None
+        prev_hop = None
+        if len(path) == 1:
+            prev_hop = cur_vp
+        elif len(path) > 1:
+            prev_hop = path[-2]
+        return path, next_hop, prev_hop
+
+    def _apply_anti_loop_penalty(self, nav_probs, nav_logits, nav_vpids, gmaps, obs, t, ended, prev_vpids, vp_visit_counts):
+        if (not self.args.anti_loop_enabled) or (not self.args.test):
+            return nav_probs
+        if self.feedback != 'argmax' or t < self.args.anti_loop_min_step:
+            return nav_probs
+
+        adjusted_nav_probs = nav_probs.clone()
+        cpu_nav_probs = nav_probs.detach().cpu()
+        cpu_nav_logits = nav_logits.detach().cpu()
+
+        for i, ob in enumerate(obs):
+            if ended[i]:
+                continue
+
+            original_top_idx = int(torch.argmax(cpu_nav_probs[i]).item())
+            step_triggered = False
+
+            for j in range(1, len(nav_vpids[i])):
+                if not torch.isfinite(cpu_nav_logits[i, j]).item():
+                    continue
+                target_vpid = nav_vpids[i][j]
+                if target_vpid is None:
+                    continue
+
+                _, next_hop, _ = self._get_graph_path_hops(gmaps[i], ob['viewpoint'], target_vpid)
+                if next_hop is None:
+                    continue
+
+                penalty = 0.0
+                if prev_vpids[i] is not None and next_hop == prev_vpids[i]:
+                    penalty += self.args.anti_loop_backtrack_penalty
+                    self.anti_loop_stats['backtrack_penalty_count'] += 1
+                if vp_visit_counts[i][next_hop] >= self.args.anti_loop_revisit_thresh:
+                    penalty += self.args.anti_loop_revisit_penalty
+                    self.anti_loop_stats['revisit_penalty_count'] += 1
+
+                if penalty <= 0:
+                    continue
+
+                adjusted_nav_probs[i, j] -= penalty
+                step_triggered = True
+
+            if step_triggered:
+                self.anti_loop_stats['anti_loop_trigger_count'] += 1
+                reranked_top_idx = int(torch.argmax(adjusted_nav_probs[i]).item())
+                if reranked_top_idx != original_top_idx:
+                    self.anti_loop_stats['anti_loop_action_changed_count'] += 1
+
+        return adjusted_nav_probs
+
     # @profile
     def rollout(self, train_ml=None, train_rl=False, reset=True):
         if reset:  # Reset env
@@ -326,6 +399,8 @@ class GMapObjectNavAgent(Seq2SeqAgent):
         # Initialization the tracking state
         ended = np.array([False] * batch_size)
         just_ended = np.array([False] * batch_size)
+        vp_visit_counts = [defaultdict(int) for _ in range(batch_size)]
+        prev_vpids = [None] * batch_size
 
         # Init the logs
         masks = []
@@ -336,6 +411,7 @@ class GMapObjectNavAgent(Seq2SeqAgent):
         for t in range(self.args.max_action_len):
             for i, gmap in enumerate(gmaps):
                 if not ended[i]:
+                    vp_visit_counts[i][obs[i]['viewpoint']] += 1
                     gmap.node_step_ids[obs[i]['viewpoint']] = t + 1
 
             # graph representation
@@ -424,7 +500,10 @@ class GMapObjectNavAgent(Seq2SeqAgent):
             if self.feedback == 'teacher':
                 a_t = nav_targets                 # teacher forcing
             elif self.feedback == 'argmax':
-                _, a_t = nav_logits.max(1)        # student forcing - argmax
+                reranked_nav_probs = self._apply_anti_loop_penalty(
+                    nav_probs, nav_logits, nav_vpids, gmaps, obs, t, ended, prev_vpids, vp_visit_counts
+                )
+                _, a_t = reranked_nav_probs.max(1)        # student forcing - argmax
                 a_t = a_t.detach() 
             elif self.feedback == 'sample':
                 c = torch.distributions.Categorical(nav_probs)
@@ -455,12 +534,16 @@ class GMapObjectNavAgent(Seq2SeqAgent):
 
             # Prepare environment action
             cpu_a_t = []  
+            next_prev_vpids = list(prev_vpids)
             for i in range(batch_size):
                 if a_t_stop[i] or ended[i] or nav_inputs['no_vp_left'][i] or (t == self.args.max_action_len - 1):
                     cpu_a_t.append(None)
                     just_ended[i] = True
                 else:
-                    cpu_a_t.append(nav_vpids[i][a_t[i]])   
+                    target_vpid = nav_vpids[i][a_t[i]]
+                    cpu_a_t.append(target_vpid)
+                    _, _, prev_hop = self._get_graph_path_hops(gmaps[i], obs[i]['viewpoint'], target_vpid)
+                    next_prev_vpids[i] = prev_hop
 
             # Make action and get the new state
             self.make_equiv_action(cpu_a_t, gmaps, obs, traj)
@@ -484,6 +567,7 @@ class GMapObjectNavAgent(Seq2SeqAgent):
 
             # new observation and update graph
             obs = self.env._get_obs()
+            prev_vpids = next_prev_vpids
             self._update_scanvp_cands(obs)
             for i, ob in enumerate(obs):
                 if not ended[i]:

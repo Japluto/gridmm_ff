@@ -18,6 +18,8 @@ seed="${SEED:-0}"
 mode="${1:-test}"
 dynamic_memory_mode="${DYNAMIC_MEMORY_MODE:-off}"
 dynamic_memory_extra_args="${DYNAMIC_MEMORY_EXTRA_ARGS:-}"
+anti_loop_mode="${ANTI_LOOP_MODE:-off}"
+anti_loop_extra_args="${ANTI_LOOP_EXTRA_ARGS:-}"
 
 name="Grid_Map-${train_alg}-${features}-reverie-single-gpu"
 name="${name}-seed.${seed}"
@@ -51,6 +53,26 @@ if [[ -n "${dynamic_memory_extra_args}" ]]; then
   # shellcheck disable=SC2206
   extra_dynamic_memory_args=(${dynamic_memory_extra_args})
   dynamic_memory_args+=("${extra_dynamic_memory_args[@]}")
+fi
+
+anti_loop_args=()
+case "${anti_loop_mode}" in
+  off)
+    ;;
+  on)
+    anti_loop_args+=(--anti_loop_enabled)
+    ;;
+  *)
+    echo "Unsupported ANTI_LOOP_MODE: ${anti_loop_mode}" >&2
+    echo "Use one of: off, on" >&2
+    exit 1
+    ;;
+esac
+
+if [[ -n "${anti_loop_extra_args}" ]]; then
+  # shellcheck disable=SC2206
+  extra_anti_loop_args=(${anti_loop_extra_args})
+  anti_loop_args+=("${extra_anti_loop_args[@]}")
 fi
 
 flag="--root_dir ${DATA_ROOT}
@@ -129,16 +151,18 @@ cuda_devices="${CUDA_VISIBLE_DEVICES:-0}"
 
 case "${mode}" in
   train)
-    echo "Running REVERIE training on ${cuda_devices}, output: ${outdir}, dynamic_memory=${dynamic_memory_mode}"
+    echo "Running REVERIE training on ${cuda_devices}, output: ${outdir}, dynamic_memory=${dynamic_memory_mode}, anti_loop=${anti_loop_mode}"
     CUDA_VISIBLE_DEVICES="${cuda_devices}" "${launcher[@]}" main_nav_obj.py ${flag} \
       "${dynamic_memory_args[@]}" \
+      "${anti_loop_args[@]}" \
       --resume_file "${resume_file}" \
       --eval_first
     ;;
   test)
-    echo "Running REVERIE test on ${cuda_devices}, output: ${outdir}, checkpoint: ${resume_file}, dynamic_memory=${dynamic_memory_mode}"
+    echo "Running REVERIE test on ${cuda_devices}, output: ${outdir}, checkpoint: ${resume_file}, dynamic_memory=${dynamic_memory_mode}, anti_loop=${anti_loop_mode}"
     CUDA_VISIBLE_DEVICES="${cuda_devices}" "${launcher[@]}" main_nav_obj.py ${flag} \
       "${dynamic_memory_args[@]}" \
+      "${anti_loop_args[@]}" \
       --test --submit \
       --resume_file "${resume_file}"
     ;;
