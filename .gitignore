@@ -11,6 +11,7 @@ __pycache__/
 /ckpts/
 /preds/
 /exprs*/
+/essay_write/
 
 /demo.gif
 /record.txt
