@@ -4,20 +4,85 @@ __pycache__/
 
 .DS_Store
 
-/datasets/
-/data/
-/default/
-/logs/
-/ckpts/
-/preds/
-/exprs*/
+# Local notes / writing that should stay private
 /essay_write/
 /codex/
 
-
+# Local records
 /demo.gif
 /record.txt
 
+# Experiment tracking
 wandb/
 tb/
 runs/
+
+# Top-level transient outputs: keep folder structure, ignore contents
+/default/**
+!/default/
+!/default/.gitkeep
+
+/logs/**
+!/logs/
+!/logs/.gitkeep
+
+/ckpts/**
+!/ckpts/
+!/ckpts/.gitkeep
+
+/preds/**
+!/preds/
+!/preds/.gitkeep
+
+# Large local resources: keep directories, ignore heavy contents
+/data/**
+!/data/
+!/data/.gitkeep
+!/data/pretrained_models/
+!/data/pretrained_models/.gitkeep
+
+/datasets/**
+!/datasets/
+!/datasets/.gitkeep
+!/datasets/R2R/
+!/datasets/R2R/.gitkeep
+!/datasets/R2R/annotations/
+!/datasets/R2R/annotations/.gitkeep
+!/datasets/R2R/connectivity/
+!/datasets/R2R/connectivity/.gitkeep
+!/datasets/R2R/features/
+!/datasets/R2R/features/.gitkeep
+!/datasets/R2R/exprs_map/
+!/datasets/R2R/exprs_map/.gitkeep
+!/datasets/REVERIE/
+!/datasets/REVERIE/.gitkeep
+!/datasets/REVERIE/annotations/
+!/datasets/REVERIE/annotations/.gitkeep
+!/datasets/REVERIE/features/
+!/datasets/REVERIE/features/.gitkeep
+!/datasets/REVERIE/exprs_map/
+!/datasets/REVERIE/exprs_map/.gitkeep
+!/datasets/RXR/
+!/datasets/RXR/.gitkeep
+!/datasets/RXR/annotations/
+!/datasets/RXR/annotations/.gitkeep
+!/datasets/RXR/connectivity/
+!/datasets/RXR/connectivity/.gitkeep
+!/datasets/RXR/features/
+!/datasets/RXR/features/.gitkeep
+!/datasets/RXR/exprs_map/
+!/datasets/RXR/exprs_map/.gitkeep
+!/datasets/SOON/
+!/datasets/SOON/.gitkeep
+!/datasets/SOON/annotations/
+!/datasets/SOON/annotations/.gitkeep
+!/datasets/SOON/features/
+!/datasets/SOON/features/.gitkeep
+!/datasets/bert-base/
+!/datasets/bert-base/.gitkeep
+!/datasets/pretrained/
+!/datasets/pretrained/.gitkeep
+!/datasets/trained_models/
+!/datasets/trained_models/.gitkeep
+!/datasets/Matterport3D/
+!/datasets/Matterport3D/.gitkeep
