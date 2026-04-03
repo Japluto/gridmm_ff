@@ -286,7 +286,9 @@ class GMapNavAgent(Seq2SeqAgent):
         for i, ob in enumerate(obs):
             action = a_t[i]
             if action is not None:            # None is the <stop> action
-                traj[i]['path'].append(gmaps[i].graph.path(ob['viewpoint'], action))
+                path_segment = gmaps[i].graph.path(ob['viewpoint'], action)
+                for vp in path_segment:
+                    traj[i]['path'].append([vp])
                 if len(traj[i]['path'][-1]) == 1:
                     prev_vp = traj[i]['path'][-2][-1]
                 else:
@@ -723,7 +725,9 @@ class GMapNavAgent(Seq2SeqAgent):
                             stop_score = v
                             stop_node = k
                     if stop_node is not None and obs[i]['viewpoint'] != stop_node:
-                        traj[i]['path'].append(gmaps[i].graph.path(obs[i]['viewpoint'], stop_node))
+                        path_segment = gmaps[i].graph.path(obs[i]['viewpoint'], stop_node)
+                        for vp in path_segment:
+                            traj[i]['path'].append([vp])
                     if self.args.detailed_output:
                         for k, v in gmaps[i].node_stop_scores.items():
                             traj[i]['details'][k] = {

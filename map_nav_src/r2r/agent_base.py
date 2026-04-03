@@ -27,10 +27,45 @@ class BaseAgent(object):
     def get_results(self, detailed_output=False):
         output = []
         for k, v in self.results.items():
-            output.append({'instr_id': k, 'trajectory': v['path']})
+            trajectory = self._normalize_submission_trajectory(v['path'])
+            self._validate_submission_trajectory(k, trajectory)
+            output.append({'instr_id': k, 'trajectory': trajectory})
             if detailed_output:
                 output[-1]['details'] = v['details']
         return output
+
+    @staticmethod
+    def _normalize_submission_trajectory(path):
+        """Flatten any path segment into single-viewpoint steps for submission.
+
+        Internal rollout code may append a whole graph path segment like
+        ["vp_a", "vp_b", "vp_c"] as one logical action. Submission/evaluator
+        expects a stepwise trajectory where each step contains exactly one
+        viewpoint identifier, e.g. [["vp_a"], ["vp_b"], ["vp_c"]].
+        """
+        normalized = []
+        for step in path:
+            if isinstance(step, (list, tuple)):
+                if len(step) == 0:
+                    continue
+                if len(step) == 1 and isinstance(step[0], str):
+                    normalized.append([step[0]])
+                elif all(isinstance(x, str) for x in step):
+                    for vp in step:
+                        normalized.append([vp])
+                else:
+                    raise AssertionError(f"Unsupported trajectory step payload: {step!r}")
+            else:
+                raise AssertionError(f"Trajectory step must be list/tuple, got {type(step)!r}: {step!r}")
+        return normalized
+
+    @staticmethod
+    def _validate_submission_trajectory(instr_id, trajectory):
+        assert isinstance(trajectory, list), (instr_id, type(trajectory))
+        for step in trajectory:
+            assert isinstance(step, (list, tuple)), (instr_id, step)
+            assert len(step) == 1, (instr_id, step)
+            assert isinstance(step[0], str), (instr_id, step)
 
     def rollout(self, **args):
         ''' Return a list of dicts containing instr_id:'xx', path:[(viewpointId, heading_rad, elevation_rad)]  '''
@@ -260,5 +295,4 @@ class Seq2SeqAgent(BaseAgent):
         for param in all_tuple:
             recover_state(*param)
         return states['vln_bert']['epoch'] - 1
-
 
