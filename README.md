@@ -1,4 +1,4 @@
-# DART-VLN: Test-Time Memory Decay and Anti-Loop Regularization for Discrete Vision-and-Language Navigation
+# DART-VLN: Test-Time Memory Decay and Anti-Loop Regularization for Discrete Vision-Language Navigation
 ---
 > WORK LEADER :Japluto
 
