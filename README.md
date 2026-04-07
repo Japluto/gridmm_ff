@@ -1,162 +1,87 @@
 # DART-VLN: Test-Time Memory Decay and Anti-Loop Regularization for Discrete Vision-Language Navigation
----
-> WORK LEADER : Japluto
 
-This repository is a discrete-environment research fork of GridMM for the paper:
+This repository is a research fork of GridMM for our discrete VLN project:
 
 **DART-VLN: Test-Time Memory Decay and Anti-Loop Regularization for Discrete Vision-Language Navigation**
 
-The project focuses on **small, training-free test-time improvements** for discrete VLN.
-Instead of introducing new learnable modules, DART-VLN studies how far we can push performance and behavior quality by modifying:
+DART-VLN focuses on lightweight, training-free test-time control for discrete vision-language navigation. Instead of adding new learnable modules, it improves inference behavior through two simple mechanisms:
 
-- **memory readout**: soft decay of stale grid memory
-- **action regularization**: lightweight anti-loop / immediate backtrack suppression
+- **Memory Decay**: softly downweights stale or redundant grid memory at readout time
+- **Anti-Loop Regularization**: suppresses immediate backtracking during action selection
 
-The main target datasets are:
+The current public-facing focus of this repository is:
 
 - `R2R`
 - `REVERIE`
-- `RxR`
 
----
 ## Preview
 
-The current repository includes a mesh-based trajectory visualization pipeline.
-The preview below uses the generated local [`trajectory.gif`](trajectory.gif):
+The repository includes a mesh-based bird's-eye trajectory renderer. The preview below is generated from the local visualization pipeline:
 
 ![Trajectory Preview](trajectory.gif)
 
----
-## What This Repo Is
+## Highlights
 
-`GridMM_ff` is a working copy extracted from the original `GridMM` codebase, with the focus shifted from continuous-environment pipelines to **discrete navigation and evaluation**.
+- **Training-free inference enhancement**: no retraining and no additional learnable parameters
+- **Clean ablations**: easy to switch between `off`, `decay_only`, `update_only`, and `full`
+- **Behavior-aware decoding**: immediate backtrack suppression improves trajectory efficiency
+- **Textured bird's-eye visualization**: real Matterport mesh rendering with topological graph overlay
+- **Discrete VLN support**: organized around practical evaluation on `R2R` and `REVERIE`
 
-The repository is organized around:
+## Repository Overview
 
-- `map_nav_src/`: discrete navigation agents, environments, and scripts
+`GridMM_ff` is a working discrete-navigation fork extracted from the original GridMM codebase. It keeps the discrete VLN foundation while shifting the focus to test-time improvements and qualitative analysis.
+
+Main directories:
+
+- `map_nav_src/`: discrete navigation agents, environments, evaluation, and visualization
 - `pretrain_src/`: pretraining code kept for completeness
 - `preprocess/`: preprocessing utilities
 
-Large resources such as datasets and pretrained checkpoints are expected locally but are git-ignored.
+Large datasets, precomputed features, and checkpoints are expected to exist locally and are usually git-ignored.
 
----
-## Main Idea
+## Method Summary
 
-Our working hypothesis is simple:
+### Memory Decay
 
-- the grid memory should not keep stale information forever
-- old or redundant information should be softly downweighted at readout
-- the agent should avoid obvious short loops such as immediate backtracking
+The memory-decay module applies a lightweight read-side reweighting rule to grid memory:
 
-This leads to two practical test-time components:
+- stale memory receives lower weight
+- repeated or redundant memory is softly suppressed
+- the backbone and learned parameters remain unchanged
 
-### 1. Memory Decay
+In our current experiments, **`decay_only` is the most reliable memory-side setting**.
 
-We add a lightweight **memory decay** mechanism for grid memory readout.
+### Anti-Loop Regularization
 
-- no retraining
-- no new trainable parameters
-- easy ablation through config flags
+The anti-loop module adds a small test-time penalty to candidate actions that would immediately return to the previous viewpoint.
 
-The strongest result so far is that **`decay_only` is more stable than more aggressive memory rewriting schemes** such as `update_only` or `full`.
-
-### 2. Anti-Loop Regularization
-
-We add a small **anti-loop penalty** at action selection time.
-
-In practice, the useful part is:
+In practice, the most useful behavior is:
 
 - **immediate backtrack suppression**
 
-That is, if the next hop of a candidate action would directly return to the previous viewpoint, we apply a small penalty before final action selection.
+This makes the agent less likely to waste steps in short local loops while remaining lightweight and easy to ablate.
 
-This mechanism is:
-
-- test-time only
-- non-invasive
-- compatible with `decay_only`
-
----
-## What We Tried
-
-Over the course of this project, we explored several lightweight directions:
-
-- **dynamic memory update** with heuristic write gates
-- **soft memory decay** during readout
-- **dual STOP** rules for R2R
-- **instruction-side augmentation**
-- **instruction-aware reranking**
-- **anti-loop / backtrack suppression**
-
-Current takeaways:
-
-- `decay_only` is the most reliable memory-side improvement
-- `anti-loop` is useful mainly as **immediate backtrack suppression**
-- `instruction`-side heuristics and `dual STOP` were not as robust in our current setting
-
----
-## Current Status
-
-### R2R
-
-This is the main development and evaluation track.
-
-Current practical recommendation:
-
-- use `decay_only` as the main score-oriented configuration
-- use `decay_only + anti-loop` as a behavior/efficiency-oriented variant
-
-### REVERIE
-
-The same dynamic-memory and anti-loop ideas have also been migrated to REVERIE.
-
-Empirically, `decay_only + anti-loop` appears especially interesting for **unseen generalization**, even when gains are not uniform across all splits.
-
-### RxR
-
-The discrete evaluation path and scripts are organized, but usable finetuned checkpoints may still need to be prepared depending on the experiment.
-
----
-## Important Design Principle
-
-This project intentionally favors:
-
-- **test-time heuristics**
-- **small code footprint**
-- **clear ablations**
-- **no architecture rewrite**
-
-In other words, DART-VLN is about improving discrete VLN behavior with simple, explainable mechanisms rather than adding new learned components.
-
----
-## Workflow
+## Recommended Workflow
 
 The practical workflow in this repository is:
 
 1. Prepare the discrete VLN environment and local datasets.
-2. Run evaluation or ablations with `decay_only` or `decay_only + anti-loop`.
+2. Run evaluation with `decay_only` or `decay_only + anti-loop`.
 3. Export prediction files for `R2R` or `REVERIE`.
-4. Render trajectory visualization on top of the textured bird's-eye mesh.
+4. Render trajectory visualizations on top of a textured bird's-eye mesh.
 
-For the current project, the most useful configurations are:
+Current rule of thumb:
 
-- `decay_only` for the cleanest memory-side gain
-- `decay_only + anti-loop` for the best behavior / efficiency trade-off
+- use **`decay_only`** for the cleanest memory-side gain
+- use **`decay_only + anti-loop`** for the strongest behavior / efficiency trade-off
 
----
 ## Running Experiments
 
-The main script entry points are:
+The main experiment entry points are:
 
 - `map_nav_src/scripts/run_r2r.sh`
 - `map_nav_src/scripts/run_reverie.sh`
-- `map_nav_src/scripts/run_rxr.sh`
-
-These scripts already expose the relevant switches for:
-
-- dynamic memory mode
-- anti-loop mode
-- dataset-specific evaluation
 
 Typical examples:
 
@@ -184,10 +109,9 @@ ANTI_LOOP_MODE=on \
 bash scripts/run_reverie.sh test
 ```
 
----
-### Fully Explicit Commands
+## Explicit Test-Time Configurations
 
-The repository defaults already encode the current tuned values for:
+The current tuned values are:
 
 - `dynamic_memory_decay_lambda = 0.12`
 - `dynamic_memory_min_mem_weight = 0.35`
@@ -197,9 +121,7 @@ The repository defaults already encode the current tuned values for:
 - `anti_loop_revisit_thresh = 2`
 - `anti_loop_min_step = 1`
 
-If you want to make every switch explicit on the command line, you can write them out as follows.
-
-R2R, decay-only:
+### R2R: decay-only
 
 ```bash
 cd map_nav_src
@@ -209,7 +131,7 @@ ANTI_LOOP_MODE=off \
 bash scripts/run_r2r.sh test
 ```
 
-R2R, decay-only + anti-loop:
+### R2R: decay-only + anti-loop
 
 ```bash
 cd map_nav_src
@@ -220,7 +142,7 @@ ANTI_LOOP_EXTRA_ARGS="--anti_loop_backtrack_penalty 0.22 --anti_loop_revisit_pen
 bash scripts/run_r2r.sh test
 ```
 
-REVERIE, decay-only + anti-loop:
+### REVERIE: decay-only + anti-loop
 
 ```bash
 cd map_nav_src
@@ -231,17 +153,16 @@ ANTI_LOOP_EXTRA_ARGS="--anti_loop_backtrack_penalty 0.22 --anti_loop_revisit_pen
 bash scripts/run_reverie.sh test
 ```
 
----
-### How To Tune from the Command Line
+## Command-Line Tuning
 
-The scripts use environment variables to keep ablations clean.
+The scripts use environment variables to keep ablations clean and reproducible:
 
 - `DYNAMIC_MEMORY_MODE=off|update_only|decay_only|full`
 - `ANTI_LOOP_MODE=off|on`
 - `DYNAMIC_MEMORY_EXTRA_ARGS="..."`
 - `ANTI_LOOP_EXTRA_ARGS="..."`
 
-Examples:
+Example:
 
 ```bash
 cd map_nav_src
@@ -258,7 +179,6 @@ ANTI_LOOP_EXTRA_ARGS="--anti_loop_backtrack_penalty 0.28 --anti_loop_revisit_pen
 bash scripts/run_r2r.sh test
 ```
 
----
 ## Visualization
 
 This repository includes mesh-based bird's-eye trajectory visualization for discrete navigation.
@@ -270,17 +190,17 @@ Main files:
 - `run_r2r_mesh_vis.sh`
 - `run_reverie_mesh_vis.sh`
 
-The renderer:
+The visualization pipeline:
 
-- uses the real Matterport mesh as the bird's-eye base map
+- uses the real Matterport mesh as the bird's-eye base layer
 - projects the topological graph onto the mesh plane
-- overlays the ground-truth path, predicted path, current viewpoint, and next move
+- overlays the ground-truth path, predicted path, current viewpoint, and next step
 - exports `frames/`, `trajectory.gif`, and `trajectory.mp4`
 
 ### Visualization Flow
 
 1. Run evaluation and produce prediction files.
-2. Make sure annotations, connectivity files, and `mp3d/*.glb` meshes are available locally.
+2. Ensure annotations, connectivity files, and `mp3d/*.glb` meshes are available locally.
 3. Run the visualization script for `R2R` or `REVERIE`.
 4. Inspect the generated GIF / MP4 and frame sequence.
 
@@ -320,11 +240,10 @@ Each rendered episode contains:
 
 ### Notes
 
-- The first run may be slower because texture decoding dependencies are initialized.
-- The textured renderer uses embedded MP3D texture data when available.
-- If texture decoding fails, the script falls back to a simpler occupancy-style mesh overlay.
+- The first run may be slower because texture decoder dependencies are initialized.
+- The renderer uses embedded MP3D texture data when available.
+- If texture decoding fails, it falls back to a simpler occupancy-style mesh overlay.
 
----
-## Acknowledgement
+## Acknowledgments
 
-This repository is built on top of the original **GridMM** codebase and keeps its discrete VLN foundation while focusing on new test-time regularization ideas for memory and action selection.
+This repository is built on top of the original **GridMM** codebase and extends it with lightweight test-time control and trajectory visualization for discrete VLN.
