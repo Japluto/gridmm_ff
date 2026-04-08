@@ -1,6 +1,6 @@
 # DART-VLN: Test-Time Memory Decay and Anti-Loop Regularization for Discrete Vision-Language Navigation
 
-This repository is a research fork of GridMM for our discrete VLN project:
+This repository is a research fork of GridMM(nice work) for our discrete VLN project:
 
 **DART-VLN: Test-Time Memory Decay and Anti-Loop Regularization for Discrete Vision-Language Navigation**
 
