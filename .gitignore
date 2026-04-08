@@ -1,6 +1,17 @@
 __pycache__/
 *.pyc
 *.pyo
+*.pt
+*.pth
+*.pth.tar
+*.ckpt
+*.bin
+*.safetensors
+*.h5
+*.hdf5
+*.npz
+*.npy
+*.codex
 
 .DS_Store
 
@@ -10,6 +21,13 @@ __pycache__/
 /.crossnote/
 /R2R-graphmv/
 /RERVERIE-graphmv/
+
+/matterport_download/v1/
+/visualizations/**
+/attachments/
+/zhihu教程.md
+/example_831_0/topo_bev_versions/**
+/example_831_0/agent_fpv/trajectory_831_0/**
 # Local records
 /demo.gif
 /record.txt
@@ -18,6 +36,7 @@ __pycache__/
 wandb/
 tb/
 runs/
+
 
 # Top-level transient outputs: keep folder structure, ignore contents
 /default/**
@@ -33,6 +52,11 @@ runs/
 
 # Large local resources: keep directories, ignore heavy contents
 /data/**
-
-
 /datasets/**
+/data/pretrained_models/**
+/datasets/pretrained/**
+/datasets/trained_models/**
+/datasets/**/features/**
+/datasets/**/exprs_map/**
+/matterport_download/v1/**
+/matterport_preview/**

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Usage:
-#   ./run_r2r_mesh_vis.sh [limit] [fps]
+#   ./run_r2r_mesh_vis.sh [limit] [fps] [seed]
 #
 # Notes:
 # - The exact local "bt022_ms1" prediction file is not present in this workspace.
@@ -11,6 +11,9 @@ set -euo pipefail
 
 LIMIT="${1:-3}"
 FPS="${2:-2}"
+SEED="${3:-$(date +%s)}"
+
+echo "[info] R2R mesh visualization seed: ${SEED}"
 
 /home/japluto/anaconda3/bin/conda run -n gridmm \
   python /home/japluto/VLN/GridMM_ff/map_nav_src/scripts/graph_nav_movie.py \
@@ -21,4 +24,5 @@ FPS="${2:-2}"
   --mesh_dir /home/japluto/VLN/GridMM/VLN_CE/data/scene_datasets/mp3d \
   --output_dir /home/japluto/VLN/GridMM_ff/visualizations/mesh_bev_textured/r2r \
   --limit "${LIMIT}" \
-  --fps "${FPS}"
+  --fps "${FPS}" \
+  --seed "${SEED}"

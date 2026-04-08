@@ -3,6 +3,7 @@ import argparse
 import json
 import math
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -41,6 +42,7 @@ GLTF_TYPE_COUNTS = {
 }
 TEXTURE_CACHE_ROOT = Path(tempfile.gettempdir()) / "gridmm_mp3d_texture_cache"
 NODE_MIN_MAJOR = 14
+RESAMPLING = getattr(Image, "Resampling", Image)
 
 
 def load_json(path):
@@ -502,7 +504,42 @@ def rasterize_triangle_texture(rgba_canvas, tri_canvas, tex, uv_tri, alpha):
     rgba_canvas[yy, xx, 3] = alpha
 
 
-def render_textured_mesh_overlay(base_image, mesh_overlay, pos3):
+def enhance_textured_patch_rgb(patch_rgb, support_mask, coverage_mask):
+    local_contrast = patch_rgb.filter(ImageFilter.UnsharpMask(radius=6.0, percent=82, threshold=3))
+    patch_rgb = Image.blend(patch_rgb, local_contrast, 0.52)
+    patch_rgb = patch_rgb.filter(ImageFilter.UnsharpMask(radius=1.45, percent=195, threshold=2))
+    patch_rgb = ImageEnhance.Contrast(patch_rgb).enhance(1.20)
+    patch_rgb = ImageEnhance.Color(patch_rgb).enhance(1.05)
+    patch_rgb = ImageEnhance.Brightness(patch_rgb).enhance(0.975)
+
+    edge_shadow_mask = ImageChops.subtract(
+        support_mask.filter(ImageFilter.MaxFilter(13)),
+        support_mask.filter(ImageFilter.MinFilter(3)),
+    ).filter(ImageFilter.GaussianBlur(radius=3.4))
+    shadow_alpha = edge_shadow_mask.point(lambda v: min(92, int(v * 0.30)))
+    shadow_overlay = Image.new("RGBA", patch_rgb.size, (0, 0, 0, 0))
+    shadow_overlay.putalpha(shadow_alpha)
+    patch_rgb = Image.alpha_composite(patch_rgb.convert("RGBA"), shadow_overlay).convert("RGB")
+
+    # Deepen already-dark local structures so furniture, rugs, and wall contacts read more clearly.
+    luminance = patch_rgb.convert("L")
+    broad_light = luminance.filter(ImageFilter.GaussianBlur(radius=8.0))
+    local_shadow_mask = ImageChops.subtract(broad_light, luminance).filter(ImageFilter.GaussianBlur(radius=1.8))
+    local_shadow_alpha = local_shadow_mask.point(lambda v: min(76, int(v * 1.35)))
+    local_shadow_overlay = Image.new("RGBA", patch_rgb.size, (10, 8, 6, 0))
+    local_shadow_overlay.putalpha(local_shadow_alpha)
+    patch_rgb = Image.alpha_composite(patch_rgb.convert("RGBA"), local_shadow_overlay).convert("RGB")
+
+    highlight_mask = coverage_mask.filter(ImageFilter.GaussianBlur(radius=2.2)).point(
+        lambda v: min(18, int(v * 0.045))
+    )
+    highlight_overlay = Image.new("RGBA", patch_rgb.size, (255, 247, 232, 0))
+    highlight_overlay.putalpha(highlight_mask)
+    patch_rgb = Image.alpha_composite(patch_rgb.convert("RGBA"), highlight_overlay).convert("RGB")
+    return patch_rgb
+
+
+def render_textured_mesh_overlay(base_image, mesh_overlay, pos3, enhanced=False):
     graph_heights = np.array([p[2] for p in pos3.values()], dtype=np.float32)
     if len(graph_heights) == 0:
         return base_image
@@ -512,7 +549,7 @@ def render_textured_mesh_overlay(base_image, mesh_overlay, pos3):
     render_mask = (
         (mesh_overlay["mean_z"] >= floor_lo)
         & (mesh_overlay["mean_z"] <= floor_hi + 1.6)
-        & (mesh_overlay["normal_z_abs"] >= 0.15)
+        & (mesh_overlay["normal_z_abs"] >= 0.32)
     )
     if not np.any(render_mask):
         return base_image
@@ -526,23 +563,27 @@ def render_textured_mesh_overlay(base_image, mesh_overlay, pos3):
 
     projected = project_world_xy_to_canvas(tri_xy.reshape(-1, 2), mesh_overlay["world_bounds"], GRAPH_BOX).reshape(-1, 3, 2)
     order = np.argsort(tri_mean_z)
-    stride = max(len(order) // 90000, 1)
+    stride = max(len(order) // (520000 if enhanced else 180000), 1)
     order = order[::stride]
 
     gx0, gy0, gx1, gy1 = GRAPH_BOX
     graph_w = gx1 - gx0
     graph_h = gy1 - gy0
+    ssaa = 3 if enhanced else 1
+    render_w = graph_w * ssaa
+    render_h = graph_h * ssaa
 
     projected_local = projected.copy()
     projected_local[:, :, 0] -= gx0
     projected_local[:, :, 1] -= gy0
+    projected_local_render = projected_local * ssaa
 
-    support_mask = Image.new("L", (graph_w, graph_h), 0)
-    coverage_mask = Image.new("L", (graph_w, graph_h), 0)
+    support_mask = Image.new("L", (render_w, render_h), 0)
+    coverage_mask = Image.new("L", (render_w, render_h), 0)
     sdraw = ImageDraw.Draw(support_mask)
     cdraw = ImageDraw.Draw(coverage_mask)
 
-    for tri, tri_local in zip(projected, projected_local):
+    for tri, tri_local in zip(projected, projected_local_render):
         min_x = float(tri[:, 0].min())
         max_x = float(tri[:, 0].max())
         min_y = float(tri[:, 1].min())
@@ -558,13 +599,13 @@ def render_textured_mesh_overlay(base_image, mesh_overlay, pos3):
             continue
         sdraw.polygon([tuple(p) for p in tri_local], fill=255)
 
-    textured_rgba = np.zeros((graph_h, graph_w, 4), dtype=np.uint8)
+    textured_rgba = np.zeros((render_h, render_w, 4), dtype=np.uint8)
     solid_overlay = Image.new("RGBA", (CANVAS_W, CANVAS_H), (0, 0, 0, 0))
     odraw = ImageDraw.Draw(solid_overlay, "RGBA")
 
     for idx in order:
         tri = projected[idx]
-        tri_local = projected_local[idx]
+        tri_local = projected_local_render[idx]
         min_x = float(tri[:, 0].min())
         max_x = float(tri[:, 0].max())
         min_y = float(tri[:, 1].min())
@@ -577,14 +618,14 @@ def render_textured_mesh_overlay(base_image, mesh_overlay, pos3):
             + tri[1, 0] * (tri[2, 1] - tri[0, 1])
             + tri[2, 0] * (tri[0, 1] - tri[1, 1])
         ) * 0.5
-        if area < 0.35:
+        if area < (0.22 if enhanced else 0.35):
             continue
 
         image_idx = int(tri_image_idx[idx])
         uv_ok = np.isfinite(tri_uv[idx]).all() and image_idx in texture_arrays
-        alpha = 242 if tri_mean_z[idx] <= floor_hi + 0.15 else 205
+        alpha = 248 if tri_mean_z[idx] <= floor_hi + 0.15 else 224
 
-        if uv_ok and area >= 6.0:
+        if uv_ok and area >= (1.4 if enhanced else 2.5):
             rasterize_triangle_texture(
                 textured_rgba,
                 tri_local,
@@ -601,56 +642,38 @@ def render_textured_mesh_overlay(base_image, mesh_overlay, pos3):
     image = base_image.convert("RGBA")
     if np.any(textured_rgba[..., 3] > 0):
         textured_overlay = Image.fromarray(textured_rgba, mode="RGBA")
-        support_mask = support_mask.filter(ImageFilter.MaxFilter(7)).filter(ImageFilter.MinFilter(7))
-        support_mask = support_mask.filter(ImageFilter.MaxFilter(5)).filter(ImageFilter.MinFilter(5))
-        coverage_mask = coverage_mask.filter(ImageFilter.MaxFilter(5)).filter(ImageFilter.MinFilter(3))
+        support_mask = support_mask.filter(ImageFilter.MaxFilter(3)).filter(ImageFilter.MinFilter(3))
+        support_mask = support_mask.filter(ImageFilter.MaxFilter(3)).filter(ImageFilter.MinFilter(3))
+        coverage_mask = coverage_mask.filter(ImageFilter.MaxFilter(3)).filter(ImageFilter.MinFilter(3))
 
-        patch_base = Image.new("RGBA", (graph_w, graph_h), (246, 246, 244, 255))
+        patch_base = Image.new("RGBA", (render_w, render_h), (246, 246, 244, 255))
         patch_rgb = Image.alpha_composite(patch_base, textured_overlay).convert("RGB")
 
-        gap_mask = ImageChops.subtract(support_mask, coverage_mask).filter(ImageFilter.GaussianBlur(radius=1.6))
-        blur_near = patch_rgb.filter(ImageFilter.GaussianBlur(radius=3.5))
-        blur_far = patch_rgb.filter(ImageFilter.GaussianBlur(radius=8.5))
-        fill_rgb = Image.blend(blur_far, blur_near, 0.72)
-        patch_rgb = Image.composite(fill_rgb, patch_rgb, gap_mask)
+        tiny_gap_mask = ImageChops.subtract(support_mask, coverage_mask).filter(ImageFilter.GaussianBlur(radius=0.9))
+        tiny_fill = patch_rgb.filter(ImageFilter.GaussianBlur(radius=1.2))
+        patch_rgb = Image.composite(tiny_fill, patch_rgb, tiny_gap_mask)
 
-        second_gap = ImageChops.subtract(
-            support_mask.filter(ImageFilter.MaxFilter(3)),
-            coverage_mask.filter(ImageFilter.MaxFilter(7)),
-        ).filter(ImageFilter.GaussianBlur(radius=2.2))
-        broader_fill = Image.blend(
-            patch_rgb.filter(ImageFilter.GaussianBlur(radius=10.5)),
-            patch_rgb.filter(ImageFilter.GaussianBlur(radius=5.0)),
-            0.65,
-        )
-        patch_rgb = Image.composite(broader_fill, patch_rgb, second_gap)
+        detail_mask = coverage_mask.filter(ImageFilter.GaussianBlur(radius=0.8))
+        sharpened_detail = patch_rgb.filter(ImageFilter.UnsharpMask(radius=0.9, percent=105, threshold=2))
+        patch_rgb = Image.composite(sharpened_detail, patch_rgb, detail_mask)
 
-        edge_inner = support_mask.filter(ImageFilter.MinFilter(7))
-        edge_mask = ImageChops.subtract(support_mask, edge_inner).filter(ImageFilter.GaussianBlur(radius=1.4))
-        edge_tone = Image.blend(patch_rgb, Image.new("RGB", (graph_w, graph_h), (108, 98, 88)), 0.18)
-        patch_rgb = Image.composite(edge_tone, patch_rgb, edge_mask)
-
-        soft_shadow = ImageChops.subtract(
-            support_mask.filter(ImageFilter.GaussianBlur(radius=9)),
-            support_mask.filter(ImageFilter.GaussianBlur(radius=2)),
-        )
-        shadow_tone = Image.blend(patch_rgb, Image.new("RGB", (graph_w, graph_h), (145, 132, 118)), 0.08)
-        patch_rgb = Image.composite(shadow_tone, patch_rgb, soft_shadow)
-
-        patch_rgb = ImageEnhance.Contrast(patch_rgb).enhance(1.22)
-        patch_rgb = ImageEnhance.Color(patch_rgb).enhance(1.11)
-        patch_rgb = ImageEnhance.Sharpness(patch_rgb).enhance(1.28)
+        if enhanced:
+            patch_rgb = enhance_textured_patch_rgb(patch_rgb, support_mask, coverage_mask)
+            patch_rgb = patch_rgb.resize((graph_w, graph_h), RESAMPLING.LANCZOS)
+            support_mask = support_mask.resize((graph_w, graph_h), RESAMPLING.LANCZOS)
+        else:
+            patch_rgb = ImageEnhance.Contrast(patch_rgb).enhance(1.06)
+            patch_rgb = ImageEnhance.Color(patch_rgb).enhance(1.02)
 
         textured_overlay = patch_rgb.convert("RGBA")
-        textured_overlay.putalpha(support_mask.point(lambda v: min(240, v)))
+        textured_overlay.putalpha(support_mask.point(lambda v: min(250, v)))
         image.alpha_composite(textured_overlay, dest=(gx0, gy0))
 
     image = Image.alpha_composite(image, solid_overlay)
 
     graph_patch = image.crop(GRAPH_BOX)
-    graph_patch = ImageEnhance.Contrast(graph_patch).enhance(1.06)
-    graph_patch = ImageEnhance.Color(graph_patch).enhance(1.04)
-    graph_patch = ImageEnhance.Sharpness(graph_patch).enhance(1.08)
+    graph_patch = ImageEnhance.Contrast(graph_patch).enhance(1.04 if enhanced else 1.02)
+    graph_patch = ImageEnhance.Color(graph_patch).enhance(1.015 if enhanced else 1.01)
     image.paste(graph_patch, GRAPH_BOX)
     return image.convert("RGB")
 
@@ -714,16 +737,56 @@ def render_occupancy_mesh_overlay(base_image, mesh_overlay, pos3):
     return Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
 
 
-def render_static_background(scan, graph, disp_pos, pos3, gt_path, mesh_overlay=None):
+def load_true3d_bev(scan, true3d_root):
+    if not true3d_root:
+        return None
+    scan_dir = Path(true3d_root) / scan
+    bev_path = scan_dir / "rgb_bev.png"
+    meta_path = scan_dir / "meta.json"
+    if not bev_path.exists() or not meta_path.exists():
+        return None
+    meta = load_json(meta_path)
+    world_bounds = tuple(meta.get("world_bounds", []))
+    if len(world_bounds) != 4:
+        return None
+    return {
+        "image_path": str(bev_path),
+        "world_bounds": world_bounds,
+        "image_size": meta.get("image_size"),
+    }
+
+
+def render_true3d_bev_background(base_image, bev_info):
+    gx0, gy0, gx1, gy1 = GRAPH_BOX
+    graph_w = gx1 - gx0
+    graph_h = gy1 - gy0
+    min_x, max_x, min_y, max_y = bev_info["world_bounds"]
+    span_x = max(max_x - min_x, 1e-6)
+    span_y = max(max_y - min_y, 1e-6)
+    scale = min((graph_w - 80) / span_x, (graph_h - 80) / span_y)
+    target_w = max(int(round(span_x * scale)), 1)
+    target_h = max(int(round(span_y * scale)), 1)
+
+    patch = Image.open(bev_info["image_path"]).convert("RGB")
+    patch = patch.resize((target_w, target_h), getattr(Image, "Resampling", Image).LANCZOS)
+    out = base_image.copy()
+    out.paste(patch, (gx0 + 40, gy1 - 40 - target_h))
+    return out
+
+
+def render_static_background(scan, graph, disp_pos, pos3, gt_path, mesh_overlay=None, mesh_enhanced=False, true3d_bev=None):
     image = Image.new("RGB", (CANVAS_W, CANVAS_H), (248, 249, 251))
     draw = ImageDraw.Draw(image)
 
     draw.rounded_rectangle(GRAPH_BOX, radius=20, fill=(255, 255, 255), outline=(210, 214, 220), width=2)
     draw.rounded_rectangle(SIDEBAR_BOX, radius=20, fill=(255, 255, 255), outline=(210, 214, 220), width=2)
 
-    if mesh_overlay is not None:
+    if true3d_bev is not None:
+        image = render_true3d_bev_background(image, true3d_bev)
+        draw = ImageDraw.Draw(image)
+    elif mesh_overlay is not None:
         if mesh_overlay.get("texture_arrays"):
-            image = render_textured_mesh_overlay(image, mesh_overlay, pos3)
+            image = render_textured_mesh_overlay(image, mesh_overlay, pos3, enhanced=mesh_enhanced)
         else:
             image = render_occupancy_mesh_overlay(image, mesh_overlay, pos3)
         draw = ImageDraw.Draw(image)
@@ -751,10 +814,12 @@ def render_static_background(scan, graph, disp_pos, pos3, gt_path, mesh_overlay=
     title_font = load_font(28)
     small_font = load_font(16)
     draw.text((GRAPH_BOX[0] + 20, GRAPH_BOX[1] + 14), "Mesh Top-Down + Topological Graph", font=title_font, fill=(31, 41, 55))
-    if mesh_overlay is None:
+    if true3d_bev is not None:
+        overlay_label = "true 3D orthographic mesh render"
+    elif mesh_overlay is None:
         overlay_label = "graph-only fallback"
     elif mesh_overlay.get("texture_arrays"):
-        overlay_label = "textured mesh overlay"
+        overlay_label = "enhanced textured mesh overlay" if mesh_enhanced else "textured mesh overlay"
     else:
         overlay_label = "occupancy mesh fallback"
     subtitle = f"scan: {scan} | topo graph projected onto mesh x-y plane | {overlay_label}"
@@ -830,7 +895,7 @@ def draw_text_block(draw, xy, title, lines, title_font, body_font, fill=(20, 20,
     return y
 
 
-def render_episode_frames(dataset, pred_item, meta, graph, disp_pos, pos3, bbox_meta=None, mesh_overlay=None):
+def render_episode_frames(dataset, pred_item, meta, graph, disp_pos, pos3, bbox_meta=None, mesh_overlay=None, mesh_enhanced=False, true3d_bev=None):
     pred_path = flatten_pred_trajectory(pred_item["trajectory"])
     gt_path = meta["gt_path"]
     scan = meta["scan"]
@@ -849,7 +914,16 @@ def render_episode_frames(dataset, pred_item, meta, graph, disp_pos, pos3, bbox_
     graph_w = xmax - xmin
     graph_h = ymax - ymin
 
-    static_bg = render_static_background(scan, graph, disp_pos, pos3, gt_path, mesh_overlay=mesh_overlay)
+    static_bg = render_static_background(
+        scan,
+        graph,
+        disp_pos,
+        pos3,
+        gt_path,
+        mesh_overlay=mesh_overlay,
+        mesh_enhanced=mesh_enhanced,
+        true3d_bev=true3d_bev,
+    )
 
     for step_idx, current_vp in enumerate(pred_path):
         image = static_bg.copy()
@@ -972,6 +1046,10 @@ def main():
     parser.add_argument("--mesh_dir", default=None)
     parser.add_argument("--limit", type=int, default=3)
     parser.add_argument("--fps", type=int, default=2)
+    parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--instr_id", default=None)
+    parser.add_argument("--mesh_enhanced", action="store_true")
+    parser.add_argument("--true3d_root", default=None)
     args = parser.parse_args()
 
     preds = load_json(args.preds)
@@ -981,6 +1059,16 @@ def main():
         anno_lookup = expand_reverie_annotations(args.annotations)
     bbox_meta = load_json(args.bbox_json) if args.bbox_json else None
 
+    preds = [p for p in preds if p.get("instr_id") in anno_lookup]
+    if args.instr_id:
+        preds = [p for p in preds if p.get("instr_id") == args.instr_id]
+        if not preds:
+            raise KeyError(f"instr_id {args.instr_id} not found in predictions after annotation filtering")
+    if args.seed is not None:
+        rng = random.Random(args.seed)
+        rng.shuffle(preds)
+        print(f"[info] sampling {min(args.limit, len(preds))} episode(s) with seed={args.seed}")
+
     ensure_dir(args.output_dir)
     graph_cache = {}
     mesh_cache = {}
@@ -988,8 +1076,6 @@ def main():
 
     for pred_item in preds[: args.limit]:
         instr_id = pred_item["instr_id"]
-        if instr_id not in anno_lookup:
-            continue
         meta = anno_lookup[instr_id]
         scan = meta["scan"]
         if scan not in graph_cache:
@@ -999,7 +1085,10 @@ def main():
 
         mesh_overlay = None
         world_bounds = None
-        if args.mesh_dir:
+        true3d_bev = load_true3d_bev(scan, args.true3d_root)
+        if true3d_bev is not None:
+            world_bounds = tuple(true3d_bev["world_bounds"])
+        elif args.mesh_dir:
             if scan not in mesh_cache:
                 mesh_cache[scan] = load_mesh_floor_triangles(args.mesh_dir, scan)
             mesh_overlay = mesh_cache[scan]
@@ -1023,6 +1112,8 @@ def main():
             pos3,
             bbox_meta=bbox_meta,
             mesh_overlay=mesh_overlay,
+            mesh_enhanced=args.mesh_enhanced,
+            true3d_bev=true3d_bev,
         )
         safe_id = instr_id.replace("/", "_")
         episode_dir = os.path.join(args.output_dir, safe_id)

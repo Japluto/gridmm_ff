@@ -28,17 +28,141 @@ The repository includes a mesh-based bird's-eye trajectory renderer. The preview
 - **Textured bird's-eye visualization**: real Matterport mesh rendering with topological graph overlay
 - **Discrete VLN support**: organized around practical evaluation on `R2R` and `REVERIE`
 
-## Repository Overview
+## Effective Repository Structure
 
 `GridMM_ff` is a working discrete-navigation fork extracted from the original GridMM codebase. It keeps the discrete VLN foundation while shifting the focus to test-time improvements and qualitative analysis.
 
-Main directories:
+```text
+GridMM_ff/
+├── map_nav_src/                  # active navigation code
+│   ├── r2r/                      # R2R task logic
+│   ├── reverie/                  # REVERIE task logic
+│   ├── scripts/                  # train / eval / visualization entrypoints
+│   ├── models/                   # navigation models
+│   └── utils/                    # shared utilities
+├── preprocess/                   # preprocessing helpers
+├── pretrain_src/                 # retained pretraining code
+├── datasets/                     # local datasets and features (git-ignored)
+│   ├── R2R/
+│   ├── REVERIE/
+│   └── Matterport3D/
+├── default/                      # local runs, checkpoints, preds (git-ignored)
+├── visualizations/               # scratch visualization outputs (git-ignored)
+├── example_831_0/                # curated example package
+├── matterport_download/          # local Matterport raw downloads
+├── matterport_preview/           # local pano preview assets
+├── run_r2r_mesh_vis.sh
+└── run_reverie_mesh_vis.sh
+```
 
-- `map_nav_src/`: discrete navigation agents, environments, evaluation, and visualization
-- `pretrain_src/`: pretraining code kept for completeness
-- `preprocess/`: preprocessing utilities
+The parts that matter most for day-to-day work are:
 
-Large datasets, precomputed features, and checkpoints are expected to exist locally and are usually git-ignored.
+- `map_nav_src/`: experiments, evaluation, and rendering
+- `datasets/`: local annotations, connectivity, features, and simulator assets
+- `default/`: local checkpoints / logs / predictions
+- `example_831_0/`: a packaged public example for inspection and demos
+
+Large datasets, precomputed features, and checkpoints are local-only resources and are intentionally git-ignored.
+
+## Example Package: `example_831_0`
+
+`example_831_0/` is a slim public example for:
+
+- `scan = JeFG25nYj2p`
+- `instr_id = 831_0`
+
+The public branch keeps the final preview assets only, so the repository stays lightweight enough to push and clone comfortably.
+
+Included files:
+
+- `latest_bev_topo.png`: final recommended static `topo + BEV` image
+- `latest_graph_nav_frame.png`: final recommended single frame in graph-nav layout
+- `latest_bev_trajectory.gif` / `latest_bev_trajectory.mp4`: final recommended animated result
+- `agent_fpv_trajectory.gif` / `agent_fpv_trajectory.mp4`: first-person preview
+- `agent_fpv_contact_sheet.png`: compact FPV summary image
+
+The full intermediate rendering history stays local and is not part of the public branch.
+
+See `example_831_0/README.md` for the file-level description of the public example package.
+
+## Data Setup
+
+This repository expects datasets to be prepared locally. We keep the code in git, but not the datasets, features, or model weights.
+
+### 1. R2R
+
+Official R2R task data is released with Matterport3DSimulator. The most useful official entry point is the R2R task README, which points to the standard task format and the `tasks/R2R/data/download.sh` helper.
+
+In this fork, the local targets are typically:
+
+- `datasets/R2R/annotations/`
+- `datasets/R2R/connectivity/`
+- `datasets/R2R/features/`
+
+Common files used by this repo include:
+
+- `datasets/R2R/annotations/R2R_train_enc.json`
+- `datasets/R2R/annotations/R2R_val_seen_enc.json`
+- `datasets/R2R/annotations/R2R_val_unseen_enc.json`
+- `datasets/R2R/connectivity/scans.txt`
+- `datasets/R2R/connectivity/*_connectivity.json`
+
+### 2. REVERIE
+
+REVERIE data is maintained in the official REVERIE repository. Use the official repo as the reference for task data layout and object-grounding annotations.
+
+In this fork, the local targets are typically:
+
+- `datasets/REVERIE/annotations/`
+- `datasets/REVERIE/features/`
+
+The key files we use are:
+
+- `datasets/REVERIE/annotations/REVERIE_*_enc.json`
+- `datasets/REVERIE/annotations/BBoxes.json`
+- `datasets/REVERIE/features/obj.avg.top3.min80_vit_base_patch16_224_imagenet.hdf5`
+
+### 3. Matterport3D
+
+For simulator RGB views, pano export, and our visualization work, you need Matterport3D access and the official download script.
+
+Useful official resources:
+
+- download script: `http://kaldir.vc.cit.tum.de/matterport/download_mp.py`
+- scan list: `http://kaldir.vc.cit.tum.de/matterport/v1/scans.txt`
+
+At minimum, Matterport3DSimulator requires:
+
+- `matterport_skybox_images`
+
+For RGB + depth aligned workflows, download:
+
+- `matterport_skybox_images`
+- `undistorted_camera_parameters`
+- `undistorted_depth_images`
+- optionally `undistorted_color_images`
+
+In our local setup, these assets usually appear in one of two places:
+
+- `datasets/Matterport3D/v1_unzip_scans/` for simulator-oriented code paths
+- `matterport_download/v1/scans/` for raw official downloads and FPV / BEV experiments
+
+### 4. Features and Weights
+
+This fork does not bundle pretrained weights or large feature files.
+
+Common local-only locations are:
+
+- `data/pretrained_models/`
+- `datasets/pretrained/`
+- `datasets/trained_models/`
+- `datasets/R2R/features/`
+- `datasets/REVERIE/features/`
+
+For the exact files required by each task, the quickest reference is the required-file check inside:
+
+- `map_nav_src/scripts/run_r2r.sh`
+- `map_nav_src/scripts/run_reverie.sh`
 
 ## Method Summary
 
@@ -243,6 +367,15 @@ Each rendered episode contains:
 - The first run may be slower because texture decoder dependencies are initialized.
 - The renderer uses embedded MP3D texture data when available.
 - If texture decoding fails, it falls back to a simpler occupancy-style mesh overlay.
+- Curated, hand-selected outputs are kept in `example_831_0/`; `visualizations/` is treated as a local scratch area.
+- The public branch keeps only a lightweight subset of preview assets. Full local rendering histories are intentionally excluded.
+
+## Official Data References
+
+- Matterport3DSimulator README: https://github.com/peteanderson80/Matterport3DSimulator
+- R2R task README: https://github.com/peteanderson80/Matterport3DSimulator/blob/master/tasks/R2R/README.md
+- REVERIE repository: https://github.com/YuankaiQi/REVERIE
+- Matterport3D official download script: http://kaldir.vc.cit.tum.de/matterport/download_mp.py
 
 ## Acknowledgments
 
